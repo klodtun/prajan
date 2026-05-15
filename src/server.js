@@ -45,7 +45,7 @@ import {
 import { privacyHtml, termsHtml } from "./pages.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BASE_PATH = process.env.BASE_PATH || "/prajan";
+const BASE_PATH = (process.env.BASE_PATH || "/").replace(/\/+$/, "") || "/";
 
 const app = Fastify({
   logger: true,
@@ -67,6 +67,12 @@ app.addContentTypeParser("application/json", { parseAs: "buffer" }, (request, bo
 app.get("/health", async () => ({ ok: true, service: "prajan-line-oa" }));
 
 await app.register(async function prajanRoutes(instance) {
+
+  instance.get("/", async () => ({
+    ok: true,
+    service: "prajan-line-oa",
+    endpoints: { privacy: "/privacy", terms: "/terms", webhook: "/webhook", admin: "/admin" }
+  }));
 
   instance.get("/privacy", async (request, reply) => {
     reply.type("text/html; charset=utf-8").send(privacyHtml(publicBaseUrl()));
