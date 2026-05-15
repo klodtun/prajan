@@ -301,4 +301,13 @@ function publicBaseUrl() {
 
 const port = Number(process.env.PORT || 3000);
 const host = process.env.HOST || "0.0.0.0";
-await app.listen({ port, host });
+
+try {
+  await app.listen({ port, host });
+  console.log(`Prajan listening on http://${host}:${port}${BASE_PATH}`);
+} catch (err) {
+  console.error("Startup failed:", err);
+  process.exit(1);
+}
+
+export default app;

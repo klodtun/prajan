@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "echo 'ready'",
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
     "check": "node --check src/server.js && node --check src/db.js && node --check src/line.js && node --check src/pages.js && node --check src/broadcast.js && node --check src/richmenu.js"
