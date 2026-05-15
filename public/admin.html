@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prajan Admin</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #100b18;
+      color: #fffaf2;
+    }
+    body { margin: 0; }
+    main { max-width: 1120px; margin: 0 auto; padding: 32px 20px 56px; }
+    header { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 28px; }
+    h1 { margin: 0; font-size: 32px; }
+    p { color: #cfc7df; }
+    label { display: grid; gap: 6px; font-size: 13px; color: #d8c8ff; }
+    input, textarea, select {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #4c3b61;
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: #1e142b;
+      color: #fffaf2;
+      font: inherit;
+    }
+    textarea { min-height: 120px; resize: vertical; }
+    button {
+      border: 0;
+      border-radius: 8px;
+      padding: 10px 14px;
+      background: #8f7add;
+      color: white;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .grid { display: grid; grid-template-columns: 380px 1fr; gap: 24px; align-items: start; }
+    .panel {
+      border: 1px solid #3d2e4e;
+      border-radius: 8px;
+      padding: 18px;
+      background: #171021;
+    }
+    .form { display: grid; gap: 14px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .items { display: grid; gap: 12px; }
+    .item { border: 1px solid #3d2e4e; border-radius: 8px; padding: 14px; background: #1a1226; }
+    .item strong { color: #fff; }
+    .item small { color: #b8adc8; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .links { display: grid; gap: 8px; font-size: 14px; }
+    a { color: #b8a8ff; }
+    @media (max-width: 860px) {
+      header, .grid, .row { grid-template-columns: 1fr; display: grid; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Prajan Admin</h1>
+        <p>จัดการรหัส คำเรียก และเนื้อหาที่ chatbot จะตอบกลับใน LINE OA</p>
+      </div>
+      <label>
+        Admin token
+        <input id="token" type="password" autocomplete="off" placeholder="ADMIN_TOKEN">
+      </label>
+    </header>
+
+    <section class="panel links" id="links"></section>
+
+    <div class="grid" style="margin-top: 24px;">
+      <section class="panel">
+        <form id="form" class="form">
+          <input id="id" type="hidden">
+          <div class="row">
+            <label>รหัส <input id="code" required placeholder="AI01"></label>
+            <label>คำเรียก <input id="keyword" required placeholder="สร้างคลิปด้วยAI"></label>
+          </div>
+          <label>ชื่อเรื่อง <input id="title" required placeholder="สร้างคลิปด้วย AI"></label>
+          <label>สรุปสั้น <input id="summary" placeholder="Prompt + วิธีใช้งาน + ตัวอย่าง"></label>
+          <label>เนื้อหา <textarea id="body" required placeholder="รายละเอียดที่จะส่งกลับให้ลูกค้า"></textarea></label>
+          <label>รูปภาพ/วิดีโอ URL <input id="media_url" placeholder="https://..."></label>
+          <div class="row">
+            <label>ปุ่ม <input id="action_label" placeholder="ดูคลิป"></label>
+            <label>ลิงก์ปุ่ม <input id="action_url" placeholder="https://..."></label>
+          </div>
+          <label>สถานะ
+            <select id="is_active">
+              <option value="1">เปิดใช้งาน</option>
+              <option value="0">ปิดใช้งาน</option>
+            </select>
+          </label>
+          <div class="actions">
+            <button type="submit">บันทึก</button>
+            <button type="button" id="reset">ล้างฟอร์ม</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="items" id="items"></section>
+    </div>
+
+    <h2 style="margin-top: 40px; color: #d8c8ff;">Leads / ข้อมูลลูกค้า</h2>
+    <div style="margin-bottom: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+      <button onclick="loadLeads()">โหลดทั้งหมด</button>
+      <button onclick="loadLeads('newbie')">Newbie</button>
+      <button onclick="loadLeads('loyal')">Loyal</button>
+      <button onclick="loadLeads('vip')">VIP</button>
+      <button onclick="loadLeads('blocked')">Blocked</button>
+    </div>
+    <section class="items" id="leads"></section>
+
+    <h2 style="margin-top: 40px; color: #d8c8ff;">Broadcast / ส่งข้อความเชิงรุก</h2>
+    <section class="panel" style="margin-bottom: 16px;">
+      <form id="broadcastForm" class="form">
+        <div class="row">
+          <label>กลุ่มเป้าหมาย
+            <select id="bc_segment">
+              <option value="all">ทั้งหมด</option>
+              <option value="newbie">Newbie</option>
+              <option value="loyal">Loyal</option>
+              <option value="vip">VIP</option>
+            </select>
+          </label>
+          <label>หัวข้อ <input id="bc_title" required placeholder="โปรโมชั่นใหม่"></label>
+        </div>
+        <label>เนื้อหา <textarea id="bc_body" required placeholder="รายละเอียดข้อความ"></textarea></label>
+        <div class="actions">
+          <button type="submit">สร้าง Broadcast</button>
+        </div>
+      </form>
+    </section>
+    <section class="items" id="broadcasts"></section>
+
+    <h2 style="margin-top: 40px; color: #d8c8ff;">ส่งข้อความรายบุคคล</h2>
+    <section class="panel">
+      <form id="pushForm" class="form">
+        <div class="row">
+          <label>LINE User ID <input id="push_userId" required placeholder="Uxxxxxxxx"></label>
+          <label>ข้อความ <input id="push_message" required placeholder="สวัสดี..."></label>
+        </div>
+        <button type="submit">ส่งข้อความ</button>
+      </form>
+    </section>
+
+    <h2 style="margin-top: 40px; color: #d8c8ff;">Rich Menu</h2>
+    <section class="panel">
+      <div class="actions">
+        <button onclick="createMenu()">สร้าง Rich Menu</button>
+        <button onclick="loadMenus()">ดูรายการ</button>
+      </div>
+      <div id="menus" style="margin-top: 12px;"></div>
+    </section>
+  </main>
+
+  <script>
+    const fields = ["id", "code", "keyword", "title", "summary", "body", "media_url", "action_label", "action_url", "is_active"];
+    const API = window.location.pathname.replace(/\/admin\/?$/, "");
+    const token = document.querySelector("#token");
+    const form = document.querySelector("#form");
+    const items = document.querySelector("#items");
+
+    token.value = localStorage.getItem("prajan_admin_token") || "";
+    token.addEventListener("input", () => localStorage.setItem("prajan_admin_token", token.value));
+
+    document.querySelector("#reset").addEventListener("click", () => {
+      form.reset();
+      document.querySelector("#id").value = "";
+      document.querySelector("#is_active").value = "1";
+    });
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const payload = Object.fromEntries(fields.map((key) => [key, document.querySelector(`#${key}`).value]));
+      payload.is_active = payload.is_active === "1";
+      await fetch(`${API}/api/content`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token.value}`
+        },
+        body: JSON.stringify(payload)
+      }).then(check);
+      form.reset();
+      await loadItems();
+    });
+
+    async function loadLinks() {
+      const data = await fetch(`${API}/api/links`).then((response) => response.json());
+      document.querySelector("#links").innerHTML = `
+        <strong>LINE OA links</strong>
+        <span>Privacy: <a href="${data.privacy}" target="_blank">${data.privacy}</a></span>
+        <span>Terms: <a href="${data.terms}" target="_blank">${data.terms}</a></span>
+        <span>Webhook: <code>${data.webhook}</code></span>
+      `;
+    }
+
+    async function loadItems() {
+      if (!token.value) return;
+      const data = await fetch(`${API}/api/content`, {
+        headers: { Authorization: `Bearer ${token.value}` }
+      }).then(check);
+      items.innerHTML = data.map((item) => `
+        <article class="item">
+          <strong>${escapeHtml(item.code)} · ${escapeHtml(item.title)}</strong><br>
+          <small>${escapeHtml(item.keyword)} · ${item.is_active ? "เปิดใช้งาน" : "ปิดใช้งาน"}</small>
+          <p>${escapeHtml(item.summary || item.body).slice(0, 180)}</p>
+          <button type="button" data-id="${item.id}">แก้ไข</button>
+        </article>
+      `).join("");
+      items.querySelectorAll("button").forEach((button) => {
+        button.addEventListener("click", () => {
+          const item = data.find((entry) => String(entry.id) === button.dataset.id);
+          for (const key of fields) document.querySelector(`#${key}`).value = item[key] ?? "";
+          document.querySelector("#is_active").value = item.is_active ? "1" : "0";
+          scrollTo({ top: 0, behavior: "smooth" });
+        });
+      });
+    }
+
+    async function check(response) {
+      if (!response.ok) throw new Error(await response.text());
+      return response.json();
+    }
+
+    function escapeHtml(value) {
+      return String(value || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }
+
+    // --- Leads ---
+    async function loadLeads(segment) {
+      if (!token.value) return;
+      const params = segment ? `?segment=${segment}` : "";
+      const data = await fetch(`${API}/api/leads${params}`, {
+        headers: { Authorization: `Bearer ${token.value}` }
+      }).then(check);
+      const leadsEl = document.querySelector("#leads");
+      leadsEl.innerHTML = data.map((lead) => `
+        <article class="item">
+          <strong>${escapeHtml(lead.full_name || "ไม่ระบุชื่อ")}</strong>
+          <small> · ${escapeHtml(lead.phone || "-")} · ${escapeHtml(lead.segment)} · ${escapeHtml(lead.status)}</small>
+          <br><small>LINE: ${escapeHtml(lead.line_user_id)} · หัวข้อ: ${escapeHtml(lead.topic)}</small>
+          <div class="actions" style="margin-top: 8px;">
+            <select onchange="updateLeadSegment('${lead.line_user_id}', this.value)">
+              <option value="">เปลี่ยน Segment</option>
+              <option value="newbie">Newbie</option>
+              <option value="loyal">Loyal</option>
+              <option value="vip">VIP</option>
+            </select>
+            <select onchange="updateLeadStatus('${lead.line_user_id}', this.value)">
+              <option value="">เปลี่ยนสถานะ</option>
+              <option value="active">Active</option>
+              <option value="blocked">Block</option>
+              <option value="redirected">Redirect</option>
+            </select>
+          </div>
+        </article>
+      `).join("") || "<p>ไม่พบข้อมูล</p>";
+    }
+
+    async function updateLeadSegment(userId, segment) {
+      if (!segment) return;
+      await fetch(`${API}/api/leads/${userId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token.value}` },
+        body: JSON.stringify({ segment })
+      }).then(check);
+      loadLeads();
+    }
+
+    async function updateLeadStatus(userId, status) {
+      if (!status) return;
+      await fetch(`${API}/api/leads/${userId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token.value}` },
+        body: JSON.stringify({ status })
+      }).then(check);
+      loadLeads();
+    }
+
+    // --- Broadcasts ---
+    const broadcastForm = document.querySelector("#broadcastForm");
+    broadcastForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      await fetch(`${API}/api/broadcasts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token.value}` },
+        body: JSON.stringify({
+          target_segment: document.querySelector("#bc_segment").value,
+          title: document.querySelector("#bc_title").value,
+          body: document.querySelector("#bc_body").value
+        })
+      }).then(check);
+      broadcastForm.reset();
+      loadBroadcasts();
+    });
+
+    async function loadBroadcasts() {
+      if (!token.value) return;
+      const data = await fetch(`${API}/api/broadcasts`, {
+        headers: { Authorization: `Bearer ${token.value}` }
+      }).then(check);
+      const el = document.querySelector("#broadcasts");
+      el.innerHTML = data.map((bc) => `
+        <article class="item">
+          <strong>${escapeHtml(bc.title)}</strong>
+          <small> · กลุ่ม: ${escapeHtml(bc.target_segment)} · สถานะ: ${escapeHtml(bc.status)}</small>
+          <p>${escapeHtml(bc.body).slice(0, 200)}</p>
+          ${bc.status !== "sent" ? `<button onclick="fireBroadcast(${bc.id})">ส่งทันที</button>` : `<small>ส่งแล้ว: ${bc.sent_at || "-"}</small>`}
+        </article>
+      `).join("") || "<p>ยังไม่มี broadcast</p>";
+    }
+
+    async function fireBroadcast(id) {
+      if (!confirm("ยืนยันส่ง broadcast นี้?")) return;
+      const result = await fetch(`${API}/api/broadcasts/${id}/send`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token.value}` }
+      }).then(check);
+      alert(`ส่งสำเร็จ ${result.sent} คน`);
+      loadBroadcasts();
+    }
+
+    // --- Push individual ---
+    const pushForm = document.querySelector("#pushForm");
+    pushForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      await fetch(`${API}/api/push`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token.value}` },
+        body: JSON.stringify({
+          line_user_id: document.querySelector("#push_userId").value,
+          message: document.querySelector("#push_message").value
+        })
+      }).then(check);
+      alert("ส่งข้อความสำเร็จ");
+      pushForm.reset();
+    });
+
+    // --- Rich Menu ---
+    async function createMenu() {
+      const result = await fetch(`${API}/api/richmenu/create`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token.value}` }
+      }).then(check);
+      alert(`สร้าง Rich Menu สำเร็จ: ${result.richMenuId}`);
+      loadMenus();
+    }
+
+    async function loadMenus() {
+      const data = await fetch(`${API}/api/richmenu`, {
+        headers: { Authorization: `Bearer ${token.value}` }
+      }).then(check);
+      const el = document.querySelector("#menus");
+      el.innerHTML = (data.menus || []).map((m) => `
+        <article class="item">
+          <strong>${escapeHtml(m.name)}</strong> <small>${m.richMenuId}</small>
+          <div class="actions" style="margin-top: 8px;">
+            <button onclick="setDefault('${m.richMenuId}')">ตั้งเป็น Default</button>
+            <button onclick="removeMenu('${m.richMenuId}')">ลบ</button>
+          </div>
+        </article>
+      `).join("") || "<p>ไม่มี Rich Menu</p>";
+    }
+
+    async function setDefault(id) {
+      await fetch(`${API}/api/richmenu/${id}/default`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token.value}` }
+      }).then(check);
+      alert("ตั้งเป็น Default สำเร็จ");
+    }
+
+    async function removeMenu(id) {
+      if (!confirm("ลบ Rich Menu นี้?")) return;
+      await fetch(`${API}/api/richmenu/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token.value}` }
+      }).then(check);
+      loadMenus();
+    }
+
+    loadLinks();
+    loadItems().catch(console.error);
+    loadBroadcasts().catch(console.error);
+  </script>
+</body>
+</html>

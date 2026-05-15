@@ -1,0 +1,298 @@
+import "dotenv/config";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import Fastify from "fastify";
+import cors from "@fastify/cors";
+import formbody from "@fastify/formbody";
+import {
+  buildContentFlex,
+  fallbackMessage,
+  getLineMessageContent,
+  replyMessage,
+  textMessage,
+  transcribeAudio,
+  verifyLineSignature,
+  welcomeMessage
+} from "./line.js";
+import {
+  autoUpgradeSegment,
+  findContentByMessage,
+  getLeadByUserId,
+  getLeadSession,
+  getMoonWisdom,
+  handleLeadAnswer,
+  listContentItems,
+  listLeads,
+  startLeadFlow,
+  trackInteraction,
+  updateLead,
+  upsertContentItem
+} from "./db.js";
+import {
+  createBroadcast,
+  listBroadcasts,
+  sendBroadcast,
+  sendIndividualMessage
+} from "./broadcast.js";
+import {
+  createRichMenu,
+  deleteRichMenu,
+  listRichMenus,
+  setDefaultRichMenu,
+  uploadRichMenuImage
+} from "./richmenu.js";
+import { privacyHtml, termsHtml } from "./pages.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const BASE_PATH = process.env.BASE_PATH || "/prajan";
+
+const app = Fastify({
+  logger: true,
+  bodyLimit: 30 * 1024 * 1024
+});
+
+await app.register(cors);
+await app.register(formbody);
+
+app.addContentTypeParser("application/json", { parseAs: "buffer" }, (request, body, done) => {
+  request.rawBody = body;
+  try {
+    done(null, JSON.parse(body.toString("utf8")));
+  } catch (error) {
+    done(error);
+  }
+});
+
+app.get("/health", async () => ({ ok: true, service: "prajan-line-oa" }));
+
+await app.register(async function prajanRoutes(instance) {
+
+  instance.get("/privacy", async (request, reply) => {
+    reply.type("text/html; charset=utf-8").send(privacyHtml(publicBaseUrl()));
+  });
+
+  instance.get("/terms", async (_request, reply) => {
+    reply.type("text/html; charset=utf-8").send(termsHtml());
+  });
+
+  instance.get("/admin", async (_request, reply) => {
+    const html = await readFile(path.join(__dirname, "..", "public", "admin.html"), "utf8");
+    reply.type("text/html; charset=utf-8").send(html);
+  });
+
+  instance.post("/webhook", async (request, reply) => {
+    const signature = request.headers["x-line-signature"];
+    if (!verifyLineSignature(request.rawBody, signature)) {
+      request.log.warn("Invalid LINE signature");
+      return reply.code(401).send({ ok: false });
+    }
+
+    for (const event of request.body.events || []) {
+      await handleLineEvent(event, request.log);
+    }
+
+    return { ok: true };
+  });
+
+  // --- Content CMS ---
+
+  instance.get("/api/content", { preHandler: requireAdmin }, async () => listContentItems());
+
+  instance.post("/api/content", { preHandler: requireAdmin }, async (request) => {
+    const id = await upsertContentItem(request.body || {});
+    return { ok: true, id };
+  });
+
+  instance.get("/api/links", async () => {
+    const baseUrl = publicBaseUrl();
+    return {
+      privacy: `${baseUrl}/privacy`,
+      terms: `${baseUrl}/terms`,
+      webhook: `${baseUrl}/webhook`,
+      admin: `${baseUrl}/admin`
+    };
+  });
+
+  // --- Leads Management ---
+
+  instance.get("/api/leads", { preHandler: requireAdmin }, async (request) => {
+    return listLeads(request.query || {});
+  });
+
+  instance.post("/api/leads/:userId", { preHandler: requireAdmin }, async (request) => {
+    await updateLead(request.params.userId, request.body || {});
+    return { ok: true };
+  });
+
+  // --- Broadcast ---
+
+  instance.get("/api/broadcasts", { preHandler: requireAdmin }, async () => listBroadcasts());
+
+  instance.post("/api/broadcasts", { preHandler: requireAdmin }, async (request) => {
+    const id = await createBroadcast(request.body || {});
+    return { ok: true, id };
+  });
+
+  instance.post("/api/broadcasts/:id/send", { preHandler: requireAdmin }, async (request) => {
+    const result = await sendBroadcast(Number(request.params.id));
+    return { ok: true, ...result };
+  });
+
+  instance.post("/api/push", { preHandler: requireAdmin }, async (request) => {
+    const { line_user_id, message } = request.body || {};
+    if (!line_user_id || !message) {
+      return { ok: false, error: "line_user_id and message required" };
+    }
+    await sendIndividualMessage(line_user_id, message);
+    return { ok: true };
+  });
+
+  // --- Rich Menu ---
+
+  instance.get("/api/richmenu", { preHandler: requireAdmin }, async () => {
+    const menus = await listRichMenus();
+    return { menus };
+  });
+
+  instance.post("/api/richmenu/create", { preHandler: requireAdmin }, async () => {
+    const richMenuId = await createRichMenu();
+    return { ok: true, richMenuId };
+  });
+
+  instance.post("/api/richmenu/:id/default", { preHandler: requireAdmin }, async (request) => {
+    await setDefaultRichMenu(request.params.id);
+    return { ok: true };
+  });
+
+  instance.delete("/api/richmenu/:id", { preHandler: requireAdmin }, async (request) => {
+    await deleteRichMenu(request.params.id);
+    return { ok: true };
+  });
+
+}, { prefix: BASE_PATH });
+
+// --- Business logic (unchanged) ---
+
+async function handleLineEvent(event, log) {
+  if (event.type === "follow") {
+    await replyMessage(event.replyToken, [welcomeMessage()]);
+    return;
+  }
+
+  if (event.type !== "message") return;
+
+  const userId = event.source?.userId || "unknown";
+  const messageType = event.message?.type || "unknown";
+  let userText = "";
+
+  const lead = await getLeadByUserId(userId);
+  if (lead?.status === "blocked") return;
+
+  try {
+    if (messageType === "text") {
+      userText = event.message.text || "";
+    } else if (messageType === "audio") {
+      const audio = await getLineMessageContent(event.message.id);
+      userText = await transcribeAudio(audio.buffer, audio.contentType);
+      if (!userText) {
+        await replyMessage(event.replyToken, [
+          textMessage("ตอนนี้ระบบรับเสียงแล้ว แต่ยังไม่ได้ตั้งค่า OPENAI_API_KEY สำหรับถอดเสียงครับ")
+        ]);
+        return;
+      }
+    } else {
+      await replyMessage(event.replyToken, [fallbackMessage()]);
+      return;
+    }
+
+    await trackInteraction(userId, messageType, userText);
+    await autoUpgradeSegment(userId);
+
+    const leadReply = await continueLeadIfActive(userId, userText);
+    if (leadReply) {
+      await replyMessage(event.replyToken, [textMessage(leadReply)]);
+      return;
+    }
+
+    const routed = await routeCommand(userId, userText);
+    if (routed) {
+      await replyMessage(event.replyToken, routed);
+      return;
+    }
+
+    const item = await findContentByMessage(userText);
+    await replyMessage(event.replyToken, item ? [buildContentFlex(item)] : [fallbackMessage()]);
+  } catch (error) {
+    log.error(error);
+    await replyMessage(event.replyToken, [
+      textMessage("ขออภัยครับ พระจันทร์ประมวลผลไม่สำเร็จชั่วคราว ลองใหม่อีกครั้งได้เลย")
+    ]);
+  }
+}
+
+async function continueLeadIfActive(userId, userText) {
+  const activeSession = await getLeadSession(userId);
+  if (!activeSession) return null;
+
+  const result = await handleLeadAnswer(userId, userText);
+  return result?.reply || null;
+}
+
+async function routeCommand(userId, text) {
+  const normalized = text.trim().toLowerCase();
+
+  if (["ขอพร", "lead", "สนใจ", "ติดต่อกลับ"].includes(normalized)) {
+    await startLeadFlow(userId, "general");
+    return [textMessage("ขอทราบชื่อ-นามสกุล เพื่อให้พระจันทร์รู้จักคุณมากขึ้นได้ไหม?")];
+  }
+
+  if (normalized.includes("ติดต่อเจ้าหน้าที่") || normalized.includes("admin")) {
+    await startLeadFlow(userId, "human_support");
+    return [textMessage("ได้ครับ ฝากชื่อ-นามสกุลไว้ก่อน แล้วทีมงานจะรับช่วงดูแลต่อให้")];
+  }
+
+  if (normalized.includes("ดูคลิป") || normalized.includes("คลิป") || normalized.includes("content")) {
+    const item = await findContentByMessage("AI01");
+    return item ? [buildContentFlex(item)] : [textMessage("ยังไม่มีคลิปในระบบตอนนี้ครับ กำลังเตรียมให้เร็ว ๆ นี้")];
+  }
+
+  if (normalized.includes("สินค้า") || normalized.includes("บริการ")) {
+    const item = await findContentByMessage("SERVICES");
+    return item ? [buildContentFlex(item)] : null;
+  }
+
+  if (normalized.includes("สุ่มพร") || normalized.includes("พรประจำวัน") || normalized === "ขอพรประจำวัน") {
+    const blessings = [
+      "วันนี้ให้เริ่มจากสิ่งเล็กที่ชัดที่สุด แล้วคำตอบถัดไปจะสว่างขึ้นเอง",
+      "พระจันทร์ขอให้คุณเจอทางลัดที่ไม่ลดคุณภาพ และมีแรงพอทำสิ่งสำคัญให้จบ",
+      "คืนนี้เหมาะกับการตัดสิ่งรบกวน เหลือไว้แค่หนึ่งงานที่ควรเดินหน้า"
+    ];
+    return [textMessage(blessings[Math.floor(Math.random() * blessings.length)])];
+  }
+
+  if (normalized.includes("คืนจันทร์เพ็ญ") || normalized.includes("ความรู้คืน") || normalized.includes("moonwisdom")) {
+    const wisdom = await getMoonWisdom();
+    return [textMessage(wisdom)];
+  }
+
+  return null;
+}
+
+function requireAdmin(request, reply, done) {
+  const expected = process.env.ADMIN_TOKEN;
+  const actual = request.headers.authorization?.replace(/^Bearer\s+/i, "");
+  if (!expected || actual !== expected) {
+    reply.code(401).send({ ok: false, error: "Unauthorized" });
+    return;
+  }
+  done();
+}
+
+function publicBaseUrl() {
+  return (process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 3000}${BASE_PATH}`).replace(/\/$/, "");
+}
+
+const port = Number(process.env.PORT || 3000);
+const host = process.env.HOST || "0.0.0.0";
+await app.listen({ port, host });
