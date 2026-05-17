@@ -7,7 +7,9 @@
     "build": "echo 'ready'",
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "check": "node --check src/server.js && node --check src/db.js && node --check src/line.js && node --check src/pages.js && node --check src/broadcast.js && node --check src/richmenu.js"
+    "import:kb": "node scripts/import-google-sheet-content.js",
+    "enrich:kb": "node scripts/enrich-google-sheet-content.js",
+    "check": "sh -c 'for f in src/server.js src/db.js src/line.js src/pages.js src/broadcast.js src/richmenu.js scripts/import-google-sheet-content.js scripts/enrich-google-sheet-content.js; do node --input-type=module --check < \"$f\" || exit 1; done'"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.1",

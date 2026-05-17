@@ -23,6 +23,27 @@ export async function findContentByMessage(message) {
   const query = normalize(message);
   if (!query) return null;
 
+  const terms = searchTerms(query);
+  const params = {
+    query,
+    qlike: `%${query}%`
+  };
+
+  const termConditions = terms.map((term, index) => {
+    params[`term${index}`] = `%${term}%`;
+    return `(LOWER(keyword) LIKE :term${index}
+      OR LOWER(title) LIKE :term${index}
+      OR LOWER(summary) LIKE :term${index}
+      OR LOWER(body) LIKE :term${index})`;
+  });
+
+  const termScore = terms.map((_term, index) => (
+    `(CASE WHEN LOWER(keyword) LIKE :term${index} THEN 6 ELSE 0 END
+      + CASE WHEN LOWER(title) LIKE :term${index} THEN 4 ELSE 0 END
+      + CASE WHEN LOWER(summary) LIKE :term${index} THEN 3 ELSE 0 END
+      + CASE WHEN LOWER(body) LIKE :term${index} THEN 1 ELSE 0 END)`
+  )).join(" + ") || "0";
+
   const [rows] = await getPool().execute(
     `SELECT id, code, keyword, title, summary, body, media_url, action_label, action_url
      FROM content_items
@@ -30,21 +51,38 @@ export async function findContentByMessage(message) {
        AND (
          LOWER(code) = LOWER(:query)
          OR LOWER(keyword) = LOWER(:query)
-         OR LOWER(:query) LIKE CONCAT('%', LOWER(keyword), '%')
-         OR LOWER(title) LIKE CONCAT('%', LOWER(:query), '%')
+         OR LOWER(keyword) LIKE :qlike
+         OR LOWER(title) LIKE :qlike
+         OR LOWER(summary) LIKE :qlike
+         OR LOWER(body) LIKE :qlike
+         ${termConditions.length ? `OR ${termConditions.join(" OR ")}` : ""}
        )
      ORDER BY
        CASE
          WHEN LOWER(code) = LOWER(:query) THEN 1
          WHEN LOWER(keyword) = LOWER(:query) THEN 2
-         ELSE 3
+         WHEN LOWER(keyword) LIKE :qlike THEN 3
+         WHEN LOWER(title) LIKE :qlike THEN 4
+         ELSE 5
        END,
+       (${termScore}) DESC,
        updated_at DESC
      LIMIT 1`,
-    { query }
+    params
   );
 
   return rows[0] || null;
+}
+
+export async function listContentByCategory(category) {
+  const pattern = `${category}%`;
+  const [rows] = await getPool().execute(
+    `SELECT id, code, title FROM content_items
+     WHERE is_active = 1 AND LOWER(code) LIKE LOWER(:pattern)
+     ORDER BY code ASC`,
+    { pattern }
+  );
+  return rows;
 }
 
 export async function listContentItems() {
@@ -243,4 +281,31 @@ function normalize(value) {
 
 function clean(value) {
   return String(value || "").trim();
+}
+
+function searchTerms(value) {
+  const stopWords = new Set([
+    "คือ",
+    "อะไร",
+    "อย่างไร",
+    "ยังไง",
+    "ช่วย",
+    "ขอ",
+    "ดู",
+    "คลิป",
+    "เรื่อง",
+    "เกี่ยวกับ",
+    "the",
+    "and",
+    "for",
+    "with"
+  ]);
+
+  return [...new Set(
+    clean(value)
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}_-]+/u)
+      .map((term) => term.trim())
+      .filter((term) => term.length >= 2 && !stopWords.has(term))
+  )].slice(0, 8);
 }

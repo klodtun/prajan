@@ -22,6 +22,7 @@ import {
   getLeadSession,
   getMoonWisdom,
   handleLeadAnswer,
+  listContentByCategory,
   listContentItems,
   listLeads,
   startLeadFlow,
@@ -258,14 +259,42 @@ async function routeCommand(userId, text) {
     return [textMessage("ได้ครับ ฝากชื่อ-นามสกุลไว้ก่อน แล้วทีมงานจะรับช่วงดูแลต่อให้")];
   }
 
-  if (normalized.includes("ดูคลิป") || normalized.includes("คลิป") || normalized.includes("content")) {
-    const item = await findContentByMessage("AI01");
-    return item ? [buildContentFlex(item)] : [textMessage("ยังไม่มีคลิปในระบบตอนนี้ครับ กำลังเตรียมให้เร็ว ๆ นี้")];
+  // Category browsing: type category name to see what's available
+  const categoryMap = {
+    pdpa: { label: "PDPA", desc: "ข้อมูลส่วนบุคคล" },
+    sec: { label: "Security", desc: "ความปลอดภัย/Cybersecurity" },
+    ai: { label: "AI", desc: "ปัญญาประดิษฐ์" },
+    train: { label: "Training", desc: "อบรม/Workshop" },
+    consent: { label: "Consent", desc: "Cookie/Privacy Notice" },
+    dpo: { label: "DPO", desc: "เจ้าหน้าที่คุ้มครองข้อมูล" },
+    svc: { label: "บริการ", desc: "Consulting/บริการ" },
+  };
+
+  if (categoryMap[normalized]) {
+    const cat = categoryMap[normalized];
+    const items = await listContentByCategory(normalized);
+    if (items.length === 0) {
+      return [textMessage(`หมวด ${cat.label} (${cat.desc}) ยังไม่มีข้อมูลในระบบครับ`)];
+    }
+    const list = items.slice(0, 15).map((item) => `${item.code} - ${item.title}`).join("\n");
+    const more = items.length > 15 ? `\n... อีก ${items.length - 15} รายการ` : "";
+    return [textMessage(`📚 หมวด ${cat.label} (${cat.desc})\nทั้งหมด ${items.length} รายการ:\n\n${list}${more}\n\nพิมพ์รหัส เช่น ${items[0].code} เพื่อดูรายละเอียด`)];
+  }
+
+  if (normalized.includes("ดูคลิป") || normalized.includes("คลิป") || normalized.includes("content") || normalized === "kb" || normalized === "knowledge") {
+    const catList = Object.entries(categoryMap).map(([k, v]) => `  ${k} → ${v.label} (${v.desc})`).join("\n");
+    return [textMessage(`📚 คลังความรู้ Prajan\n\nพิมพ์ชื่อหมวดเพื่อดูรายการ:\n${catList}\n\nหรือพิมพ์รหัสตรง เช่น sec01, pdpa05, ai03`)];
   }
 
   if (normalized.includes("สินค้า") || normalized.includes("บริการ")) {
     const item = await findContentByMessage("SERVICES");
-    return item ? [buildContentFlex(item)] : null;
+    if (item) return [buildContentFlex(item)];
+    const svcItems = await listContentByCategory("svc");
+    if (svcItems.length > 0) {
+      const list = svcItems.map((s) => `${s.code} - ${s.title}`).join("\n");
+      return [textMessage(`สินค้าและบริการ:\n\n${list}\n\nพิมพ์รหัส เช่น ${svcItems[0].code} เพื่อดูรายละเอียด`)];
+    }
+    return null;
   }
 
   if (normalized.includes("สุ่มพร") || normalized.includes("พรประจำวัน") || normalized === "ขอพรประจำวัน") {
