@@ -179,7 +179,78 @@ await app.register(async function prajanRoutes(instance) {
 
 }, { prefix: BASE_PATH });
 
-// --- Business logic (unchanged) ---
+// --- Category definitions ---
+
+const CATEGORIES = {
+  pdpa: { label: "PDPA", desc: "ข้อมูลส่วนบุคคล" },
+  sec: { label: "Security", desc: "ความปลอดภัย/Cybersecurity" },
+  ai: { label: "AI", desc: "ปัญญาประดิษฐ์" },
+  train: { label: "Training", desc: "อบรม/Workshop" },
+  consent: { label: "Consent", desc: "Cookie/Privacy Notice" },
+  dpo: { label: "DPO", desc: "เจ้าหน้าที่คุ้มครองข้อมูล" },
+  svc: { label: "บริการ", desc: "Consulting/บริการ" },
+};
+
+const PAGE_SIZE = 10;
+const NEXT_KEYWORDS = ["ต่อ", "เพิ่ม", "ต่อไป", "next", "ถัดไป", "ข้อมูลเพิ่ม"];
+
+// --- Pagination session per user (in-memory, auto-expire 10 min) ---
+
+const browseSession = new Map();
+const SESSION_TTL = 10 * 60 * 1000;
+
+function setBrowse(userId, category, page) {
+  browseSession.set(userId, { category, page, timestamp: Date.now() });
+}
+
+function getBrowse(userId) {
+  const s = browseSession.get(userId);
+  if (!s) return null;
+  if (Date.now() - s.timestamp > SESSION_TTL) { browseSession.delete(userId); return null; }
+  return s;
+}
+
+function clearBrowse(userId) {
+  browseSession.delete(userId);
+}
+
+async function buildCategoryPage(userId, catKey, page) {
+  const cat = CATEGORIES[catKey];
+  const items = await listContentByCategory(catKey);
+  if (items.length === 0) return [textMessage(`หมวด ${cat.label} ยังไม่มีข้อมูลในระบบครับ`)];
+
+  const totalPages = Math.ceil(items.length / PAGE_SIZE);
+  const safePage = Math.min(page, totalPages - 1);
+  const start = safePage * PAGE_SIZE;
+  const pageItems = items.slice(start, start + PAGE_SIZE);
+
+  setBrowse(userId, catKey, safePage);
+
+  const lines = pageItems.map((item, i) => {
+    const num = start + i + 1;
+    const title = (item.title || "").slice(0, 45);
+    return `${num}. ${item.code}  ${title}`;
+  });
+
+  let msg = `📚 ${cat.label} (${cat.desc})\n`;
+  msg += `หน้า ${safePage + 1}/${totalPages} (${items.length} รายการ)\n`;
+  msg += `─────────────────\n`;
+  msg += lines.join("\n");
+  msg += `\n─────────────────\n`;
+
+  if (safePage + 1 < totalPages) {
+    const nextStart = (safePage + 1) * PAGE_SIZE + 1;
+    const nextEnd = Math.min((safePage + 2) * PAGE_SIZE, items.length);
+    msg += `พิมพ์ "ต่อ" → หน้าถัดไป (${nextStart}-${nextEnd})`;
+  } else {
+    msg += `✅ แสดงครบทุกรายการแล้ว`;
+  }
+  msg += `\nพิมพ์รหัส เช่น ${pageItems[0].code} เพื่อดูคลิป`;
+
+  return [textMessage(msg)];
+}
+
+// --- Business logic ---
 
 async function handleLineEvent(event, log) {
   if (event.type === "follow") {
@@ -247,57 +318,47 @@ async function continueLeadIfActive(userId, userText) {
 }
 
 async function routeCommand(userId, text) {
-  const normalized = text.trim().toLowerCase();
+  const normalized = text.trim().toLowerCase().replace(/\s+/g, "");
+
+  // "ต่อ" / "เพิ่ม" / "ต่อไป" → ดูหน้าถัดไป
+  if (NEXT_KEYWORDS.includes(normalized)) {
+    const session = getBrowse(userId);
+    if (session) {
+      return buildCategoryPage(userId, session.category, session.page + 1);
+    }
+    return [textMessage("ยังไม่ได้เลือกหมวด พิมพ์ชื่อหมวดก่อนนะครับ เช่น pdpa, sec, ai")];
+  }
+
+  // Category name (pdpa, sec, Sec, PDPA, AI, etc.) → หน้าแรก
+  if (CATEGORIES[normalized]) {
+    return buildCategoryPage(userId, normalized, 0);
+  }
+
+  // Clear browse session when switching to other commands
+  clearBrowse(userId);
 
   if (["ขอพร", "lead", "สนใจ", "ติดต่อกลับ"].includes(normalized)) {
     await startLeadFlow(userId, "general");
     return [textMessage("ขอทราบชื่อ-นามสกุล เพื่อให้พระจันทร์รู้จักคุณมากขึ้นได้ไหม?")];
   }
 
-  if (normalized.includes("ติดต่อเจ้าหน้าที่") || normalized.includes("admin")) {
+  if (normalized.includes("ติดต่อเจ้าหน้าที่")) {
     await startLeadFlow(userId, "human_support");
     return [textMessage("ได้ครับ ฝากชื่อ-นามสกุลไว้ก่อน แล้วทีมงานจะรับช่วงดูแลต่อให้")];
   }
 
-  // Category browsing: type category name to see what's available
-  const categoryMap = {
-    pdpa: { label: "PDPA", desc: "ข้อมูลส่วนบุคคล" },
-    sec: { label: "Security", desc: "ความปลอดภัย/Cybersecurity" },
-    ai: { label: "AI", desc: "ปัญญาประดิษฐ์" },
-    train: { label: "Training", desc: "อบรม/Workshop" },
-    consent: { label: "Consent", desc: "Cookie/Privacy Notice" },
-    dpo: { label: "DPO", desc: "เจ้าหน้าที่คุ้มครองข้อมูล" },
-    svc: { label: "บริการ", desc: "Consulting/บริการ" },
-  };
-
-  if (categoryMap[normalized]) {
-    const cat = categoryMap[normalized];
-    const items = await listContentByCategory(normalized);
-    if (items.length === 0) {
-      return [textMessage(`หมวด ${cat.label} (${cat.desc}) ยังไม่มีข้อมูลในระบบครับ`)];
-    }
-    const list = items.slice(0, 15).map((item) => `${item.code} - ${item.title}`).join("\n");
-    const more = items.length > 15 ? `\n... อีก ${items.length - 15} รายการ` : "";
-    return [textMessage(`📚 หมวด ${cat.label} (${cat.desc})\nทั้งหมด ${items.length} รายการ:\n\n${list}${more}\n\nพิมพ์รหัส เช่น ${items[0].code} เพื่อดูรายละเอียด`)];
-  }
-
-  if (normalized.includes("ดูคลิป") || normalized.includes("คลิป") || normalized.includes("content") || normalized === "kb" || normalized === "knowledge") {
-    const catList = Object.entries(categoryMap).map(([k, v]) => `  ${k} → ${v.label} (${v.desc})`).join("\n");
+  if (["kb", "knowledge", "ดูคลิป", "คลิป", "content", "คลังความรู้"].includes(normalized)) {
+    const catList = Object.entries(CATEGORIES).map(([k, v]) => `  ${k} → ${v.label} (${v.desc})`).join("\n");
     return [textMessage(`📚 คลังความรู้ Prajan\n\nพิมพ์ชื่อหมวดเพื่อดูรายการ:\n${catList}\n\nหรือพิมพ์รหัสตรง เช่น sec01, pdpa05, ai03`)];
   }
 
   if (normalized.includes("สินค้า") || normalized.includes("บริการ")) {
     const item = await findContentByMessage("SERVICES");
     if (item) return [buildContentFlex(item)];
-    const svcItems = await listContentByCategory("svc");
-    if (svcItems.length > 0) {
-      const list = svcItems.map((s) => `${s.code} - ${s.title}`).join("\n");
-      return [textMessage(`สินค้าและบริการ:\n\n${list}\n\nพิมพ์รหัส เช่น ${svcItems[0].code} เพื่อดูรายละเอียด`)];
-    }
-    return null;
+    return buildCategoryPage(userId, "svc", 0);
   }
 
-  if (normalized.includes("สุ่มพร") || normalized.includes("พรประจำวัน") || normalized === "ขอพรประจำวัน") {
+  if (["สุ่มพร", "พรประจำวัน", "ขอพรประจำวัน"].includes(normalized)) {
     const blessings = [
       "วันนี้ให้เริ่มจากสิ่งเล็กที่ชัดที่สุด แล้วคำตอบถัดไปจะสว่างขึ้นเอง",
       "พระจันทร์ขอให้คุณเจอทางลัดที่ไม่ลดคุณภาพ และมีแรงพอทำสิ่งสำคัญให้จบ",
