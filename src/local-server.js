@@ -256,7 +256,8 @@ function handleText(text, userId) {
       "ปัญหาที่ดูใหญ่ตอนกลางคืนมักเล็กลงเมื่อเช้ามาถึง จดไว้แล้วพักก่อน",
       "ไม่มีใครชนะด้วยความรู้อย่างเดียว แต่ชนะด้วยการลงมือทำซ้ำจนชำนาญ",
     ];
-    return [textMsg(blessings[Math.floor(Math.random() * blessings.length)])];
+    const blessing = blessings[Math.floor(Math.random() * blessings.length)];
+    return [textMsg(`🌙 ${blessing}\n\n✨ แจ้งพร ความต้องการทางธุรกิจของท่านมาให้เรา ถ้าเราทำได้เราจะทำให้\n\nพิมพ์ 'kb' ดูคลังความรู้ หรือ 'ติดต่อ' เพื่อคุยกับทีมงาน`)];
   }
 
   // ติดต่อเจ้าหน้าที่

@@ -337,7 +337,7 @@ async function routeCommand(userId, text) {
   // Clear browse session when switching to other commands
   clearBrowse(userId);
 
-  if (["ขอพร", "lead", "สนใจ", "ติดต่อกลับ"].includes(normalized)) {
+  if (["lead", "สนใจ", "ติดต่อกลับ"].includes(normalized)) {
     await startLeadFlow(userId, "general");
     return [textMessage("ขอทราบชื่อ-นามสกุล เพื่อให้พระจันทร์รู้จักคุณมากขึ้นได้ไหม?")];
   }
@@ -358,13 +358,16 @@ async function routeCommand(userId, text) {
     return buildCategoryPage(userId, "svc", 0);
   }
 
-  if (["สุ่มพร", "พรประจำวัน", "ขอพรประจำวัน"].includes(normalized)) {
+  if (["ขอพร", "สุ่มพร", "พรประจำวัน", "ขอพรประจำวัน"].includes(normalized)) {
     const blessings = [
       "วันนี้ให้เริ่มจากสิ่งเล็กที่ชัดที่สุด แล้วคำตอบถัดไปจะสว่างขึ้นเอง",
       "พระจันทร์ขอให้คุณเจอทางลัดที่ไม่ลดคุณภาพ และมีแรงพอทำสิ่งสำคัญให้จบ",
-      "คืนนี้เหมาะกับการตัดสิ่งรบกวน เหลือไว้แค่หนึ่งงานที่ควรเดินหน้า"
+      "คืนนี้เหมาะกับการตัดสิ่งรบกวน เหลือไว้แค่หนึ่งงานที่ควรเดินหน้า",
+      "ปัญหาที่ดูใหญ่ตอนกลางคืนมักเล็กลงเมื่อเช้ามาถึง จดไว้แล้วพักก่อน",
+      "ไม่มีใครชนะด้วยความรู้อย่างเดียว แต่ชนะด้วยการลงมือทำซ้ำจนชำนาญ",
     ];
-    return [textMessage(blessings[Math.floor(Math.random() * blessings.length)])];
+    const blessing = blessings[Math.floor(Math.random() * blessings.length)];
+    return [textMessage(`🌙 ${blessing}\n\n✨ แจ้งพร ความต้องการทางธุรกิจของท่านมาให้เรา ถ้าเราทำได้เราจะทำให้\n\nพิมพ์ 'kb' ดูคลังความรู้ หรือ 'ติดต่อเจ้าหน้าที่' เพื่อคุยกับทีมงาน`)];
   }
 
   if (normalized.includes("คืนจันทร์เพ็ญ") || normalized.includes("ความรู้คืน") || normalized.includes("moonwisdom")) {
